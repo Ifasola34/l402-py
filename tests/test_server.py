@@ -163,3 +163,35 @@ def test_authorize_require_backend_settled_paths():
         SECRET, ln, auth_header_value=auth2, resource_id="r2",
         require_backend_settled=True,
     ) is False
+
+
+def test_authorize_checks_expiry_before_backend():
+    """Round-2 fix: expired macaroons must be rejected WITHOUT ever
+    calling ln.check_paid(). Otherwise replayed expired tokens are
+    an amplification vector against the LN node."""
+
+    class _CountingBackend:
+        name = "count"
+        check_paid_calls = 0
+        def create_invoice(self, *_a, **_k):
+            raise NotImplementedError
+        def check_paid(self, *_a, **_k):
+            type(self).check_paid_calls += 1
+            return True
+
+    counting = _CountingBackend()
+    # Build an expired macaroon directly (bypassing make_challenge's
+    # automatic future exp=).
+    real_ln = DeterministicMockBackend()
+    inv = real_ln.create_invoice(100, "test")
+    m = Macaroon.create(SECRET, "r1", inv.payment_hash, ["exp=1"])
+    preimage = real_ln.reveal_preimage(inv.payment_hash)
+    auth = f"L402 {m.to_token()}:{preimage}"
+
+    assert authorize(
+        SECRET, counting,
+        auth_header_value=auth, resource_id="r1",
+        require_backend_settled=True,
+    ) is False
+    # The expiry check must short-circuit BEFORE check_paid is called.
+    assert _CountingBackend.check_paid_calls == 0

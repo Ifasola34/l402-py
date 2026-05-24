@@ -107,11 +107,10 @@ def authorize(
         return False
     if hashlib.sha256(preimage).hexdigest() != m.payment_hash:
         return False
-    if require_backend_settled and not ln.check_paid(m.payment_hash):
-        return False
-
     # Mandatory expiry: macaroon must carry at least one exp= caveat,
-    # and every exp= must be in the future.
+    # and every exp= must be in the future. This MUST run BEFORE the
+    # optional backend settlement check so a flood of replayed expired
+    # tokens cannot amplify into a flood of LN node RPC calls.
     now = int(time.time())
     saw_exp = False
     for c in m.caveats:
@@ -124,4 +123,8 @@ def authorize(
                 return False
     if not saw_exp:
         return False
+
+    if require_backend_settled and not ln.check_paid(m.payment_hash):
+        return False
+
     return True

@@ -75,6 +75,26 @@ def test_make_auth_header_rejects_colon_in_token():
         make_auth_header("MAC:has:colons", "ab" * 32)
 
 
+def test_make_auth_header_rejects_non_hex_preimage():
+    """Round-2 fix: preimage must be 64 hex chars exactly. Otherwise
+    whitespace/CRLF in a malicious pay_callback's return value would
+    allow HTTP header injection."""
+    with pytest.raises(ValueError, match="64 hex"):
+        make_auth_header("MAC", "ab" * 32 + "\r\nX-Evil: yes")
+    with pytest.raises(ValueError, match="64 hex"):
+        make_auth_header("MAC", "not hex at all")
+    with pytest.raises(ValueError, match="64 hex"):
+        make_auth_header("MAC", "ab" * 16)   # too short
+
+
+def test_make_auth_header_accepts_well_formed_preimage():
+    h = make_auth_header("MAC", "ab" * 32)
+    assert h == f"L402 MAC:{'ab' * 32}"
+    # Uppercase hex also valid.
+    h = make_auth_header("MAC", "AB" * 32)
+    assert h == f"L402 MAC:{'AB' * 32}"
+
+
 # ---------- L402Client end-to-end ---------------------------------
 
 
@@ -169,3 +189,19 @@ def test_client_propagates_non_402_errors():
         status, body = client.get("http://test/")
     assert status == 500
     assert pay_calls["n"] == 0, "must not invoke pay_callback on 500"
+
+
+def test_client_wraps_urlerror_as_l402networkerror():
+    """Round-2 fix: URLError (DNS failure, connection refused, timeout,
+    TLS errors) used to escape request() uncaught, breaking the
+    documented (status, body) return contract. Now wrapped as
+    L402NetworkError."""
+    from l402.client import L402NetworkError
+
+    def dns_fail(req, timeout=None):
+        raise urllib.error.URLError("DNS lookup failed for test.invalid")
+
+    client = L402Client(pay_callback=lambda c: "00" * 32)
+    with patch("l402.client.urllib.request.urlopen", side_effect=dns_fail):
+        with pytest.raises(L402NetworkError, match="network error"):
+            client.get("http://test.invalid/")

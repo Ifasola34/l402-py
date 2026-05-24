@@ -26,6 +26,7 @@ from .backends import (
 )
 from .client import (
     L402Client,
+    L402NetworkError,
     ParsedChallenge,
     make_auth_header,
     parse_challenge_header,
@@ -39,7 +40,8 @@ __all__ = [
     "Macaroon",
     "LnInvoice", "L402Challenge",
     "make_challenge", "authorize",
-    "parse_challenge_header", "make_auth_header", "L402Client", "ParsedChallenge",
+    "parse_challenge_header", "make_auth_header", "L402Client",
+    "ParsedChallenge", "L402NetworkError",
     "LightningBackend",
     "DeterministicMockBackend", "LndRestBackend", "PhoenixdBackend", "ClnRestBackend",
 ]

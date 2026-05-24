@@ -29,6 +29,13 @@ from dataclasses import dataclass
 from typing import Callable
 
 
+class L402NetworkError(Exception):
+    """Wraps transport-layer failures (DNS, connection refused, timeout,
+    TLS handshake errors) so callers see one exception type for
+    "couldn't talk to the server at all" instead of having to catch
+    every urllib.error.URLError subclass."""
+
+
 @dataclass(frozen=True)
 class ParsedChallenge:
     """The fields a WWW-Authenticate L402 header carries."""
@@ -70,11 +77,27 @@ def parse_challenge_header(www_auth_value: str) -> ParsedChallenge:
     return ParsedChallenge(macaroon_token=macaroon, invoice_bolt11=invoice)
 
 
+_PREIMAGE_HEX_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+
+
 def make_auth_header(macaroon_token: str, preimage_hex: str) -> str:
-    """Build the value for `Authorization: <return value>`."""
+    """Build the value for `Authorization: <return value>`.
+
+    Validates both the macaroon token (no ':' which would corrupt the
+    splitter on the server side) AND the preimage (must be exactly 64
+    hex chars). Invalid preimages with whitespace or newlines would
+    otherwise allow HTTP header-injection attacks via a compromised
+    pay_callback.
+    """
     if ":" in macaroon_token:
         raise ValueError(
             "macaroon token contains ':' which would corrupt the header"
+        )
+    if not _PREIMAGE_HEX_RE.match(preimage_hex):
+        raise ValueError(
+            "preimage_hex must be exactly 64 hex characters; refusing to "
+            "build an Authorization header from input that could carry "
+            "control characters or CRLF injection"
         )
     return f"L402 {macaroon_token}:{preimage_hex}"
 
@@ -166,3 +189,8 @@ class L402Client:
             body_bytes = e.read() if hasattr(e, "read") else b""
             www_auth = e.headers.get("WWW-Authenticate") if e.headers else None
             return e.code, body_bytes, www_auth
+        except urllib.error.URLError as e:
+            # DNS failure, connection refused, timeout, TLS handshake fail —
+            # surface as one library-defined exception so callers don't have
+            # to know urllib's exception hierarchy.
+            raise L402NetworkError(f"network error contacting {url}: {e}")

@@ -24,7 +24,9 @@ import json
 import os
 import ssl
 import urllib.error
+import urllib.parse
 import urllib.request
+from collections import OrderedDict
 from typing import Protocol
 
 from .types import LnInvoice
@@ -189,8 +191,11 @@ class PhoenixdBackend:
         data = None
         headers = {"Authorization": self._auth_header}
         if form_body is not None:
+            # urllib.parse.quote (not urllib.request.quote — that's an
+            # undocumented internal re-export in CPython that PyPy and
+            # other implementations don't necessarily expose).
             data = "&".join(
-                f"{k}={urllib.request.quote(str(v))}"
+                f"{k}={urllib.parse.quote(str(v))}"
                 for k, v in form_body.items()
             ).encode("ascii")
             headers["Content-Type"] = "application/x-www-form-urlencoded"
@@ -239,6 +244,11 @@ class ClnRestBackend:
 
     name = "cln"
 
+    # Cap the label cache so a long-running server doesn't leak memory
+    # at ~80 bytes per outstanding invoice. 100k entries is far above
+    # any realistic concurrent-invoice ceiling and ~8MB worst case.
+    _LABEL_CACHE_MAX = 100_000
+
     def __init__(
         self,
         url: str,
@@ -252,7 +262,8 @@ class ClnRestBackend:
         self._ssl_ctx = _make_ssl_context(tls_cert_path)
         # CLN's `label` is the only durable way to look an invoice back
         # up; we track payment_hash → label so check_paid() works.
-        self._label_for: dict[str, str] = {}
+        # OrderedDict gives us O(1) LRU eviction when the cache is full.
+        self._label_for: OrderedDict[str, str] = OrderedDict()
 
     def _request(self, method: str, path: str, body: dict | None = None) -> dict:
         data = json.dumps(body).encode("utf-8") if body is not None else None
@@ -280,6 +291,11 @@ class ClnRestBackend:
         })
         payment_hash = resp["payment_hash"]
         self._label_for[payment_hash] = label
+        # LRU eviction when cap is hit. The dropped entries fall back
+        # to the payment_hash filter on check_paid(), which still works
+        # on most modern clnrest builds.
+        while len(self._label_for) > self._LABEL_CACHE_MAX:
+            self._label_for.popitem(last=False)
         return LnInvoice(
             bolt11=resp["bolt11"],
             payment_hash=payment_hash,
