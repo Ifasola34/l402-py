@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "l402-py"
+version = "0.1.0"
+description = "L402 (Lightning paywall) for Python — both sides of the protocol: server-side challenge issuance + authorize validation, client-side challenge parsing + automated payment dance. Ships drivers for LND REST, Phoenixd, and Core Lightning (CLN), plus a deterministic in-process mock. Zero deps outside the standard library + click."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Ifasola34"},
+]
+keywords = ["lightning", "bitcoin", "l402", "lsat", "macaroon", "paywall", "402"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Security :: Cryptography",
+]
+dependencies = [
+    "click>=8.0",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
+[project.scripts]
+l402 = "l402.cli:main"
+
+[project.urls]
+Repository = "https://github.com/Ifasola34/l402-py"
+"L402 spec" = "https://docs.lightning.engineering/the-lightning-network/l402"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
