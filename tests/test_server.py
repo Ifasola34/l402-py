@@ -42,6 +42,19 @@ def test_make_challenge_preserves_caller_exp():
     assert exp_caveats == ["exp=9999999999"]
 
 
+def test_make_challenge_rejects_malformed_caller_exp():
+    """Round-3 fix: caller-supplied exp= values are int()-validated
+    at issuance time. Previously caveats=['exp=tomorrow'] would mint
+    a token that authorize silently rejected later — operator saw
+    'all paying users blocked' with no error from the issuance call."""
+    ln = DeterministicMockBackend()
+    with pytest.raises(ValueError, match="malformed exp="):
+        make_challenge(
+            SECRET, ln, resource_id="r1",
+            caveats=["exp=tomorrow"],
+        )
+
+
 def test_challenge_header_format():
     ln = DeterministicMockBackend()
     chal = make_challenge(SECRET, ln, resource_id="r1")
@@ -93,11 +106,23 @@ def test_authorize_rejects_wrong_secret():
 
 def test_authorize_rejects_malformed_headers():
     ln = DeterministicMockBackend()
-    for bad in ["", "Bearer abc", "L402 noseparator", "L402 :emptytoken",
-                "l402 lowercase-prefix"]:
+    for bad in ["", "Bearer abc", "L402 noseparator", "L402 :emptytoken"]:
         assert authorize(
             SECRET, ln, auth_header_value=bad, resource_id="r1",
         ) is False
+
+
+def test_authorize_accepts_case_insensitive_scheme():
+    """RFC 7235 mandates case-insensitive auth schemes. Round-3 fix:
+    accept L402, l402, L402, and any other casing of the scheme name."""
+    ln = DeterministicMockBackend()
+    chal = make_challenge(SECRET, ln, resource_id="r1")
+    preimage = ln.reveal_preimage(chal.payment_hash)
+    for prefix in ["L402 ", "l402 ", "L402 ", "L402 "]:
+        auth = f"{prefix}{chal.macaroon_token}:{preimage}"
+        assert authorize(
+            SECRET, ln, auth_header_value=auth, resource_id="r1",
+        ) is True, f"scheme {prefix.strip()!r} should be accepted (RFC 7235)"
 
 
 def test_authorize_rejects_macaroon_without_exp_caveat():

@@ -18,6 +18,7 @@ Wire flow:
 from __future__ import annotations
 
 import hashlib
+import hmac
 import time
 
 from .backends import LightningBackend
@@ -49,6 +50,20 @@ def make_challenge(
     elif not any(c.startswith("exp=") for c in caveats):
         # Caller-supplied caveats with no expiry: append our default.
         caveats = list(caveats) + [f"exp={int(time.time()) + expiry_seconds}"]
+    else:
+        # Caller supplied at least one exp= — validate it's parseable
+        # so the macaroon we issue isn't born already-unusable. Without
+        # this check, caveats=["exp=tomorrow"] would mint a token that
+        # authorize() silently rejects later with no diagnostic.
+        for c in caveats:
+            if c.startswith("exp="):
+                try:
+                    int(c.split("=", 1)[1])
+                except ValueError:
+                    raise ValueError(
+                        f"caveat {c!r} has a malformed exp= value; "
+                        "value must be an integer unix timestamp"
+                    )
     m = Macaroon.create(
         secret=secret, identifier=resource_id,
         payment_hash=inv.payment_hash, caveats=caveats,
@@ -87,9 +102,17 @@ def authorize(
     is opt-in defense in depth; it NEVER grants access on its own, only
     revokes it.
     """
-    if not auth_header_value or not auth_header_value.startswith("L402 "):
+    # RFC 7235 mandates case-insensitive auth schemes. Accept "L402 ",
+    # "l402 ", "L402 " etc. equally. We compare the first 5 chars
+    # case-insensitively and require the trailing space.
+    if (
+        not auth_header_value
+        or len(auth_header_value) < 5
+        or auth_header_value[:4].lower() != "l402"
+        or auth_header_value[4] != " "
+    ):
         return False
-    creds = auth_header_value[len("L402 "):]
+    creds = auth_header_value[5:]
     if ":" not in creds:
         return False
     token, preimage_hex = creds.split(":", 1)
@@ -105,7 +128,12 @@ def authorize(
         preimage = bytes.fromhex(preimage_hex)
     except ValueError:
         return False
-    if hashlib.sha256(preimage).hexdigest() != m.payment_hash:
+    # Constant-time hex compare to match the hardening posture of the
+    # earlier verify_tag check. Practical preimage second-preimage
+    # attacks on SHA-256 are infeasible, but consistency matters.
+    if not hmac.compare_digest(
+        hashlib.sha256(preimage).hexdigest(), m.payment_hash,
+    ):
         return False
     # Mandatory expiry: macaroon must carry at least one exp= caveat,
     # and every exp= must be in the future. This MUST run BEFORE the

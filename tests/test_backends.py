@@ -215,3 +215,24 @@ def test_cln_check_paid_handles_missing_label_via_hash_filter():
     assert ok is True
     req = mock_open.call_args[0][0]
     assert "?payment_hash=ff" in req.full_url
+
+
+def test_cln_check_paid_url_encodes_label_with_special_chars():
+    """Round-3 fix: labels can contain operator-controlled chars
+    derived from resource_id (& = ? # whitespace). Without URL
+    encoding, an unencoded & breaks the query into two params and
+    check_paid silently returns False (paying users locked out)."""
+    list_resp = json.dumps({
+        "invoices": [{"payment_hash": "ee" * 32, "status": "paid"}],
+    }).encode()
+    b = ClnRestBackend(url="https://cln", rune="R")
+    # Inject a label with the most dangerous chars.
+    b._label_for["ee" * 32] = "l402-premium&admin=foo-abc"
+    with patch("l402.backends.urllib.request.urlopen",
+               return_value=_FakeResp(list_resp)) as mock_open:
+        b.check_paid("ee" * 32)
+    sent_url = mock_open.call_args[0][0].full_url
+    # & must be URL-encoded as %26, = as %3D — proves the query
+    # isn't being split into multiple params.
+    assert "%26admin%3Dfoo" in sent_url
+    assert "&admin=" not in sent_url.split("?", 1)[1]

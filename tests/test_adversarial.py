@@ -204,12 +204,14 @@ def test_rejects_preimage_that_doesnt_hash_to_payment_hash():
 
 def test_rejects_malformed_authorization_headers():
     ln = DeterministicMockBackend()
+    # Round-3 fix: case-insensitive scheme matching per RFC 7235.
+    # Lowercase 'l402 ' is now ACCEPTED — see test_authorize_accepts_
+    # case_insensitive_scheme in test_server.py.
     for bad in [
         "",
         "Bearer abcdef",
         "L402 noseparator",
         "L402 :emptytoken",
-        "l402 lowercase-prefix",   # case-sensitive scheme
         "L402  double-space",
     ]:
         assert authorize(

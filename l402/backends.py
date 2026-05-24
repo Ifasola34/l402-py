@@ -303,14 +303,20 @@ class ClnRestBackend:
         )
 
     def check_paid(self, payment_hash: str) -> bool:
+        # URL-encode the lookup keys before interpolating. Labels are
+        # derived from operator-controlled memo/resource_id and can
+        # contain `&`, `=`, `?`, `#`, whitespace — an unencoded `&`
+        # would produce a malformed query and silently make this
+        # method return False (paying users locked out under
+        # require_backend_settled=True). payment_hash is safe today
+        # (64-hex from LnInvoice) but we encode both for defensive
+        # consistency.
         label = self._label_for.get(payment_hash)
         if label is None:
-            # Issuer-instance lost the label (process restart, etc.).
-            # Fall back to filtering by payment_hash; some clnrest
-            # versions support this directly.
             try:
                 resp = self._request(
-                    "GET", f"/v1/listinvoices?payment_hash={payment_hash}",
+                    "GET",
+                    f"/v1/listinvoices?payment_hash={urllib.parse.quote(payment_hash, safe='')}",
                 )
             except urllib.error.HTTPError as e:
                 if e.code == 404:
@@ -318,7 +324,10 @@ class ClnRestBackend:
                 raise
         else:
             try:
-                resp = self._request("GET", f"/v1/listinvoices?label={label}")
+                resp = self._request(
+                    "GET",
+                    f"/v1/listinvoices?label={urllib.parse.quote(label, safe='')}",
+                )
             except urllib.error.HTTPError as e:
                 if e.code == 404:
                     return False
