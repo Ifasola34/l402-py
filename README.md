@@ -1,5 +1,9 @@
 # l402-py
 
+[![CI](https://github.com/Ifasola34/l402-py/actions/workflows/ci.yml/badge.svg)](https://github.com/Ifasola34/l402-py/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+
 **L402 (Lightning paywall) for Python — both sides of the protocol.**
 
 L402 is the Lightning-native HTTP 402 protocol: client hits an endpoint, server returns `402 Payment Required` with a Lightning invoice + opaque macaroon, client pays the invoice, retries with the preimage as proof. No accounts. No API keys. No KYC. Just Bitcoin.
